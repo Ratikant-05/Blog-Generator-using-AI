@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlogMagic - Generate Your Blog</title>
+  <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Add Quill dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+</head>
+<body>
+    <div class="blog-generator">
+        <!-- Chat Section -->
+        <div class="chat-section">
+            <div class="chat-header">
+                <h2>Chat with BlogMagic</h2>
+                <div class="chat-status">
+                    <span class="status-indicator"></span>
+                    <span>AI Assistant</span>
+                </div>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be added here dynamically -->
+                <div class="message-wrapper">
+                    <div class="ai-avatar">AI</div>
+                    <div class="message-meta">
+                        <div class="message-sender">BlogMagic AI</div>
+                        <div class="message ai-message">
+                            <div class="message-content">
+                                <p>Welcome to BlogMagic! I'm here to help you create amazing blog content. Just type your message below to get started.</p>
+                            </div>
+                            <div class="message-time">Just now</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="chat-input-container">
+                <textarea id="user-input" placeholder="Type your message here..." rows="3"></textarea>
+                <div class="input-controls">
+                    <button class="send-button">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                    <button class="clear-button" id="clear-button">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Output Section -->
+        <div class="output-section">
+            <div class="output-header">
+                <h2>Your Blog Post</h2>
+                <div class="output-actions">
+                    <button class="action-button" id="copy-button">
+                        <i class="fa-solid fa-copy"></i>
+                    </button>
+                    <button class="action-button" id="download-button">
+                        <i class="fa-solid fa-download"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="blog-output" id="blog-output">
+                <div id="loading-overlay" style="display: none;">
+                    <div class="loading-spinner">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </div>
+                    <p>Generating your blog post<span class="loading-dots"></span></p>
+                </div>
+                <div id="editor">
+                    <h2>Write a blog here or generate a blog using the chat section</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- <script src="script.js"></script> -->
+     <script>
+        
+ // Constants
+const API_URL = 'https://furpssgdgg.execute-api.us-east-1.amazonaws.com/default/llm_chat';
+
+// Add controller for cancellation
+let generationController = null;
+
+// Initialize Quill editor
+const quill = new Quill('#editor', {
+    theme: 'snow',
+    modules: {
+        toolbar: [
+            [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
+            ['bold', 'italic', 'underline', 'strike'],
+            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+            [{ 'color': [] }, { 'background': [] }],
+            ['link', 'image'],
+            ['clean']
+        ]
+    }
+});
+
+// Load saved content when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Load saved blog content
+    const savedBlog = localStorage.getItem('BlogGenerated');
+    if (savedBlog) {
+        quill.root.innerHTML = savedBlog;
+    }
+    
+    // Load chat history
+    loadChatHistory();
+
+    // Get topic from URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const topic = urlParams.get('topic');
+    
+    // Only trigger generation if there's a non-empty topic and it's not from a refresh
+    if (topic && topic.trim() !== '' && !sessionStorage.getItem('hasGenerated')) {
+        // Set the topic in the textarea
+        const chatInput = document.getElementById('user-input');
+        chatInput.value = topic;
+        
+        // Set a flag to prevent regeneration on refresh
+        sessionStorage.setItem('hasGenerated', 'true');
+        
+        // Trigger the send button click
+        const sendButton = document.querySelector('.send-button');
+        sendButton.click();
+    }
+});
+
+// Function to add a message to the chat
+function addMessageToChat(message, isUser = false, imageUrls = null) {
+    const chatMessages = document.getElementById('chat-messages');
+    const messageWrapper = document.createElement('div');
+    messageWrapper.className = 'message-wrapper';
+    
+    if (isUser) {
+        messageWrapper.classList.add('user');
+    }
+
+    const avatar = document.createElement('div');
+    avatar.className = isUser ? 'user-avatar' : 'ai-avatar';
+    avatar.textContent = isUser ? 'U' : 'AI';
+
+    const messageMeta = document.createElement('div');
+    messageMeta.className = 'message-meta';
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
+
+    const content = document.createElement('div');
+    content.className = 'message-content';
+    
+    if (imageUrls && imageUrls.length > 0) {
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-container';
+        imageContainer.style.display = 'flex';
+        imageContainer.style.justifyContent = 'center';
+        imageContainer.style.marginBottom = '10px';
+        
+        imageUrls.forEach(url => {
+            const img = document.createElement('img');
+            img.src = url;
+            img.style.width = '100%';
+            img.style.maxWidth = '800px';
+            img.style.height = 'auto';
+            img.style.borderRadius = '8px';
+            img.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+            img.style.cursor = 'pointer';
+            img.draggable = true;
+            imageContainer.appendChild(img);
+        });
+        
+        content.appendChild(imageContainer);
+    }
+    
+    content.innerHTML += `<p>${message}</p>`;
+
+    const time = document.createElement('div');
+    time.className = 'message-time';
+    time.textContent = 'Just now';
+
+    messageDiv.appendChild(content);
+    messageDiv.appendChild(time);
+    messageMeta.appendChild(messageDiv);
+    messageWrapper.appendChild(avatar);
+    messageWrapper.appendChild(messageMeta);
+
+    chatMessages.appendChild(messageWrapper);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// Function to load chat history - now just shows welcome message
+function loadChatHistory() {
+    const chatMessages = document.getElementById('chat-messages');
+    
+    // Clear existing messages except the welcome message
+    while (chatMessages.children.length > 1) {
+        chatMessages.removeChild(chatMessages.lastChild);
+    }
+}
+
+// Function to clean up the response content
+function cleanResponseContent(content) {
+    // Remove extra spaces and normalize line breaks
+    let cleaned = content.replace(/\s+/g, ' ').trim();
+    
+    // Replace markdown headers with HTML headers
+    cleaned = cleaned.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+    cleaned = cleaned.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    cleaned = cleaned.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    cleaned = cleaned.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+    cleaned = cleaned.replace(/^```html\s+(.+)$/gm, '<h4>$1</h4>');
+    cleaned = cleaned.replace(/^   ```\s+(.+)$/gm, '<h4>$1</h4>');
+    
+    // Replace markdown bold and italic with HTML
+    cleaned = cleaned.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    cleaned = cleaned.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    
+    // Replace markdown lists with HTML lists
+    cleaned = cleaned.replace(/^\s*[-*+]\s+(.+)$/gm, '<li>$1</li>');
+    cleaned = cleaned.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+    
+    // Replace markdown links with HTML links
+    cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    
+    // Add proper paragraph tags
+    cleaned = cleaned.replace(/\n\n/g, '</p><p>');
+    cleaned = '<p>' + cleaned + '</p>';
+    
+    // Clean up any double paragraph tags
+    cleaned = cleaned.replace(/<\/p><p>/g, '</p><p>');
+
+    // Center the placeholder images and add class for hover effects
+    cleaned = cleaned.replace(/<img src="\/assets\/placeholder\.svg"/g, '<img src="/assets/placeholder.svg" style="display: block; margin: 2em auto; max-width: 100%; height: auto;" class="placeholder-image"');
+    
+    return cleaned;
+}
+
+// Function to generate content from API
+async function generateContent(prompt) {
+    try {
+        // Create new AbortController for this generation
+        generationController = new AbortController();
+        const signal = generationController.signal;
+
+        const query = [
+            { role: "system", content: `
+                Okay, AI, from this point forward, you are an HTML Blog Generator.
+
+                Your sole purpose is to generate complete blog posts in HTML format based on the topics and requirements I provide.
+
+                Here are the strict rules for every blog post you generate:
+                
+                Overall Output Format: The entire response MUST be a well-formed HTML snippet. Do not include any text or explanations outside of the HTML code itself, unless it's within HTML comments <!-- like this --> for your own structural notes if absolutely necessary (but preferably not).
+
+                Main Heading:
+                
+                The main blog title MUST be enclosed within an <h1> tag.
+                The text of the heading itself (inside the <h1> tags) MUST NOT use any additional formatting tags like <b> or <strong>.
+                The heading must be UNIQUE and MUST NOT BE SIMILAR TO THE USER'S PROMPT.
+                    
+                Example: <h1>This is the Main Blog Title</h1>
+
+                Topic Description (Post-Heading):
+                Immediately following the <h1> heading, you MUST provide a descriptive paragraph of approximately 100 words about the main topic of the blog.
+                This description should be enclosed in <p> tags.
+                Subheadings:
+                IMPORTANT: There must be at least 3 subheadings.
+                The blog post MUST include relevant subheadings to structure the content.
+                Each subheading MUST be enclosed within an <h3> tag.
+                Example: <h3>This is a Subheading</h3>
+                Subheading Content:
+                Immediately following each <h3> subheading, you MUST provide a detailed description or elaboration related to that subheading. IMPORTANT:Give a class to the h3 tag as ".subheading".
+                This content for each subheading should be approximately 100-150 words long.
+                This content should be enclosed in <p> tags. You may use multiple <p> tags if logically appropriate to hit the word count and maintain readability.
+
+                Conclusion:
+                The blog post MUST end with a conclusion section.
+                The title or introductory phrase for the conclusion (e.g., "Conclusion," "Final Thoughts," "In Summary") MUST be enclosed within an <h2> tag.
+                Example: <h2>Conclusion</h2>
+                IMPORTANT: the conclusion should be 100-150 words.
+                The actual concluding paragraphs (summarizing key points, offering a final thought, or a call to action) should follow this <h2> tag, enclosed in <p> tags.
+                Structure and Cleanliness:
+                The entire blog post must be well-structured and logically organized.
+                CRITICALLY IMPORTANT: Your HTML output must be clean. This means:
+                NO unnecessary asterisks (*).
+
+                NO unnecessary hash symbols (#).
+
+                NO unnecessary leading/trailing spaces within text content.
+                
+                NO unnecessary extra line breaks or spaces between HTML tags unless it genuinely improves readability of the raw HTML (e.g., indenting nested elements is fine, but random blank lines between paragraphs are not).
+
+                Use standard HTML tags like <p> for paragraphs.
+
+                IMPORTANT: The blog post must be 2000 words or more.
+
+                VERY IMPORTANT: Remove the first paragraph of the blog post.
+
+                VERY IMPORTANT: The blog post must be in A4 format.
+
+                IMPLEMENTING placeholder image: 
+
+                VERY IMPORTANT: Add assets/placeholder.svg to the blog at random places.
+                1. Ensure only three placeholders are added to the whole blog. 
+                2. STRICT: It must have the css property of float.
+                3. The size of the assets/placeholder.svg image must be 400x400.
+
+                VERY IMPORTANT: Give me the placeholder with class="placeholder-image".
+                ` },
+                { role: "user", content: prompt }
+        ];
+
+        const encodedQuery = encodeURIComponent(JSON.stringify(query));
+        const url = `${API_URL}?link=writecream.com2&query=${encodedQuery}`;
+
+        const response = await fetch(url, { signal });
+        if (!response.ok) throw new Error("Failed to fetch content");
+
+        const data = await response.json();
+        const cleanedContent = cleanResponseContent(data.response_content || "No content generated.");
+        return cleanedContent;
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.log('Generation cancelled');
+            return null;
+        }
+        console.error("Error generating content:", error);
+        return "Sorry, there was an error generating the content.";
+    } finally {
+        generationController = null;
+    }
+}
+
+// Function to upload image to Cloudinary
+async function uploadToCloudinary(base64Image) {
+    try {
+        // Convert base64 to blob
+        const response = await fetch(base64Image);
+        const blob = await response.blob();
+
+        // Create form data
+        const formData = new FormData();
+        formData.append('file', blob);
+        formData.append('upload_preset', 'ml_default');
+
+        // Upload to Cloudinary
+        const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/dd3nlw5ub/image/upload`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!uploadResponse.ok) {
+            throw new Error('Failed to upload to Cloudinary');
+        }
+
+        const data = await uploadResponse.json();
+        return data.secure_url;
+    } catch (error) {
+        console.error('Error uploading to Cloudinary:', error);
+        return null;
+    }
+}
+
+// Function to replace placeholder images with actual images
+function replaceImagePlaceholders(imageUrl) {
+    const placeholderImages = document.querySelectorAll('.placeholder-image');
+    if (placeholderImages.length > 0) {
+        // Get the first placeholder image
+        const placeholder = placeholderImages[0];
+        
+        // Create new image element
+        const newImage = document.createElement('img');
+        newImage.src = imageUrl;
+        newImage.classList.add('blog-image');
+        newImage.style.maxWidth = '100%';
+        newImage.style.height = 'auto';
+        newImage.style.borderRadius = '8px';
+        newImage.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+        newImage.style.margin = '2em 0';
+        newImage.style.transition = 'transform 0.3s ease';
+        
+        // Add hover effect
+        newImage.addEventListener('mouseover', () => {
+            newImage.style.transform = 'scale(1.02)';
+        });
+        newImage.addEventListener('mouseout', () => {
+            newImage.style.transform = 'scale(1)';
+        });
+        
+        // Replace placeholder with new image
+        placeholder.parentNode.replaceChild(newImage, placeholder);
+        
+        // Update the editor content in localStorage
+        const editorContent = quill.root.innerHTML;
+        localStorage.setItem('BlogGenerated', editorContent);
+        
+        return true;
+    }
+    return false;
+}
+
+// Modify the generateImage function to include Cloudinary upload
+async function generateImage(prompt) {
+    try {
+        // Enhance the prompt for better image generation
+        const enhancedPrompt = `Create a high-quality, professional blog image: ${prompt}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`;
+
+        const imageResponse = await fetch('https://api.deepinfra.com/v1/openai/images/generations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ofZxkV2E7aTDvbirZCB16zJHSbbfOxdN`
+            },
+            body: JSON.stringify({
+                prompt: enhancedPrompt,
+                size: "1024x1024",
+                model: "black-forest-labs/FLUX-1-dev",
+                n: 1,
+                guidance_scale: 20,
+                num_inference_steps: 50,
+                response_format: "b64_json",
+                negative_prompt: "blurry, low quality, distorted, text, watermark, signature, ugly, deformed, disfigured, poorly drawn face, mutation, mutated, extra limb, missing limb, floating limbs, disconnected limbs, malformed hands, blur, out of focus, long neck, long body, distorted proportions, bad anatomy, bad proportions, gross proportions, text, error, missing fingers, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
+            })
+        });
+
+        if (!imageResponse.ok) {
+            throw new Error('Image generation failed');
+        }
+
+        const imageData = await imageResponse.json();
+        
+        if (!imageData.data || imageData.data.length === 0) {
+            throw new Error('No image data received');
+        }
+
+        // Convert base64 to image URL and upload to Cloudinary
+        const base64Image = `data:image/png;base64,${imageData.data[0].b64_json}`;
+        const imageUrl = await uploadToCloudinary(base64Image);
+        
+        if (imageUrl) {
+            replaceImagePlaceholders(imageUrl);
+        }
+        
+        return [imageUrl];
+    } catch (error) {
+        console.error('Error generating image:', error);
+        addMessageToChat("Sorry, there was an error generating the image. Please try again.", false);
+        return null;
+    }
+}
+
+// Function to update editor content
+function updateEditorContent(content) {
+    quill.root.innerHTML = content;
+}
+
+// Add event listener for chat input
+const chatInput = document.getElementById('user-input');
+const sendButton = document.querySelector('.send-button');
+
+// Modify the handleSendMessage function to handle Cloudinary URLs
+async function handleSendMessage(event) {
+    if (event) {
+        event.preventDefault();
+    }
+    const message = chatInput.value.trim();
+    
+    if (message) {
+        // Add user message to chat
+        addMessageToChat(message, true);
+        
+        // Clear input immediately after adding message
+        chatInput.value = '';
+        
+        // Show loading overlay
+        const loadingOverlay = document.getElementById('loading-overlay');
+        loadingOverlay.style.display = 'flex';
+        
+        try {
+            // Generate and update content
+            const content = await generateContent(message);
+            
+            // Check if generation was cancelled
+            if (!content) {
+                addMessageToChat("Blog generation was cancelled.", false);
+                return;
+            }
+
+            updateEditorContent(content);
+
+            // Add success message for blog generation
+            addMessageToChat("Great! I've generated your blog post. Now, let me create some relevant images to enhance your content...", false);
+
+            // Update loading text for image generation
+            const loadingText = loadingOverlay.querySelector('p');
+            loadingText.classList.add('fade-out');
+            setTimeout(() => {
+                loadingText.innerHTML = 'Generating images for the blog<span class="loading-dots"></span>';
+                loadingText.classList.remove('fade-out');
+                loadingText.classList.add('fade-in');
+            }, 500);
+
+            // Generate and log image prompts
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+
+            // Extract headings and key paragraphs
+            const headings = Array.from(tempDiv.getElementsByTagName('h3')).map(h => h.textContent);
+            const paragraphs = Array.from(tempDiv.getElementsByTagName('p')).map(p => p.textContent);
+
+            // Create prompts based on the content
+            const prompts = [];
+            
+            // First prompt based on main heading
+            const mainHeading = tempDiv.getElementsByTagName('h1')[0]?.textContent;
+            if (mainHeading) {
+                prompts.push(`Create a professional and engaging image representing: ${mainHeading}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post header.`);
+            } else {
+                prompts.push(`Create a professional and engaging image representing the main topic: ${message}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post header.`);
+            }
+
+            // Use subheadings as prompts for remaining images
+            if (headings.length > 0) {
+                headings.forEach((heading, index) => {
+                    if (index < 2) { // Only use first two subheadings to keep total of 3 images
+                        const relatedParagraph = paragraphs[index] || '';
+                        const context = relatedParagraph.substring(0, 150);
+                        prompts.push(`Create a detailed and professional image for the section: ${heading}. Context: ${context}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post section.`);
+                    }
+                });
+            } else if (paragraphs.length > 0) {
+                // Fallback if no subheadings
+                const mainContent = paragraphs[0].substring(0, 150);
+                const conclusion = paragraphs[paragraphs.length - 1].substring(0, 150);
+                prompts.push(`Create a detailed and professional image for the main content: ${mainContent}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`);
+                prompts.push(`Create a detailed and professional image for the conclusion: ${conclusion}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post conclusion.`);
+            } else {
+                prompts.push(`Create a detailed and professional image for the topic: ${message}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`);
+                prompts.push(`Create a detailed and professional image for the key concept: ${message}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`);
+            }
+
+            // Show loading message for all images
+            addMessageToChat('Generating all images<span class="loading-dots"></span>', false);
+
+            // Generate all images in parallel
+            const imagePromises = prompts.map(prompt => generateImage(prompt));
+            const imageResults = await Promise.all(imagePromises);
+
+            // Remove loading message
+            const chatMessages = document.getElementById('chat-messages');
+            const loadingMessage = chatMessages.lastElementChild;
+            if (loadingMessage) {
+                chatMessages.removeChild(loadingMessage);
+            }
+
+            // Add processing message
+            addMessageToChat("Processing and optimizing the generated images...", false);
+
+            // Process all generated images
+            for (let i = 0; i < imageResults.length; i++) {
+                const imageUrls = imageResults[i];
+                if (imageUrls && imageUrls.length > 0) {
+                    // Add the generated image to the chat
+                    addMessageToChat("Image generated successfully!", false, imageUrls);
+                    
+                    // Create image container with caption
+                    const imageContainer = document.createElement('div');
+                    imageContainer.className = 'blog-image-container';
+                    imageContainer.style.margin = '2em 0';
+                    imageContainer.style.textAlign = 'center';
+
+                    // Create the image element
+                    const img = document.createElement('img');
+                    img.src = imageUrls[0];
+                    img.alt = `Generated image ${i + 1}`;
+                    img.style.maxWidth = '100%';
+                    img.style.height = 'auto';
+                    img.style.borderRadius = '8px';
+                    img.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                    img.style.marginBottom = '0.5em';
+
+                    // Create caption with URL
+                    const caption = document.createElement('p');
+                    caption.className = 'image-caption';
+                    caption.style.fontSize = '0.9em';
+                    caption.style.color = '#666';
+                    caption.style.fontStyle = 'italic';
+                    caption.style.margin = '0.5em 0';
+                    caption.innerHTML = `Figure ${i + 1}: ${prompts[i]}<br><span style="font-size: 0.8em; color: #888;">Image URL: <a href="${imageUrls[0]}" target="_blank">${imageUrls[0]}</a></span>`;
+
+                    // Add image and caption to container
+                    imageContainer.appendChild(img);
+                    imageContainer.appendChild(caption);
+
+                    // Get current content
+                    const currentContent = quill.root.innerHTML;
+                    let newContent;
+
+                    // Insert image at appropriate location
+                    if (i === 0) {
+                        // Insert after main heading
+                        newContent = currentContent.replace('</h1>', `</h1>${imageContainer.outerHTML}`);
+                    } else if (i === 1 && headings.length > 0) {
+                        // Insert after first subheading
+                        const headingIndex = currentContent.indexOf(headings[0]);
+                        if (headingIndex !== -1) {
+                            const afterHeading = currentContent.indexOf('</h3>', headingIndex) + 5;
+                            newContent = currentContent.slice(0, afterHeading) + imageContainer.outerHTML + currentContent.slice(afterHeading);
+                        }
+                    } else {
+                        // Insert before conclusion
+                        const conclusionIndex = currentContent.lastIndexOf('<h2>');
+                        if (conclusionIndex !== -1) {
+                            newContent = currentContent.slice(0, conclusionIndex) + imageContainer.outerHTML + currentContent.slice(conclusionIndex);
+                        } else {
+                            newContent = currentContent + imageContainer.outerHTML;
+                        }
+                    }
+
+                    // Update the editor content
+                    quill.root.innerHTML = newContent;
+                }
+            }
+
+            // Update localStorage with the new content including images
+            localStorage.setItem('BlogGenerated', quill.root.innerHTML);
+            
+            // Add completion message
+            addMessageToChat("All images have been generated and added to your blog post!", false);
+        } catch (error) {
+            console.error('Error generating content:', error);
+            addMessageToChat("Sorry, there was an error generating the content.", false);
+        } finally {
+            // Hide loading overlay
+            loadingOverlay.style.display = 'none';
+        }
+    }
+}
+
+sendButton.addEventListener('click', (event) => handleSendMessage(event));
+chatInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage(e);
+    }
+});
+
+// Update the copy button functionality
+document.getElementById('copy-button').addEventListener('click', () => {
+    const content = quill.getText(); // Get plain text instead of HTML
+    navigator.clipboard.writeText(content).then(() => {
+ alert('Blog content copied to clipboard!');
+});
+});
+
+// Update the download button functionality
+document.getElementById('download-button').addEventListener('click', () => {
+    // Get the HTML content from Quill editor
+    const content = quill.root.innerHTML;
+    
+    // Create a temporary div to hold the content
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = content;
+    
+    // Add comprehensive styling to the content
+    tempDiv.style.padding = '40px';
+    tempDiv.style.fontFamily = 'Poppins, sans-serif';
+    tempDiv.style.lineHeight = '1.6';
+    tempDiv.style.width = '210mm'; // A4 width
+    tempDiv.style.minHeight = '297mm'; // A4 height
+    tempDiv.style.margin = '0 auto';
+    tempDiv.style.backgroundColor = 'white';
+    
+    // Add styles for headings and paragraphs
+    const style = document.createElement('style');
+    style.textContent = `
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            font-size: 24pt;
+            margin-top: 1.5em;
+            margin-bottom: 1em;
+            color: #2d3436;
+            border-bottom: 2px solid #6c5ce7;
+            padding-bottom: 0.3em;
+        }
+        h2 {
+            font-size: 20pt;
+            margin-top: 1.5em;
+            margin-bottom: 1em;
+            color: #2d3436;
+        }
+        h3 {
+            font-size: 16pt;
+            margin-top: 1.2em;
+            margin-bottom: 0.8em;
+            color: #2d3436;
+        }
+        h4 {
+            font-size: 14pt;
+            margin-top: 1em;
+            margin-bottom: 0.6em;
+            color: #2d3436;
+        }
+        p {
+            margin-bottom: 1em;
+            font-size: 12pt;
+            line-height: 1.8;
+        }
+        img {
+            max-width: 100%;
+            margin: 1.5em 0;
+            border-radius: 8px;
+            page-break-inside: avoid;
+        }
+        ul, ol {
+            margin: 1em 0;
+            padding-left: 2em;
+        }
+        li {
+            margin-bottom: 0.5em;
+            font-size: 12pt;
+        }
+        blockquote {
+            margin: 1.5em 0;
+            padding: 1em;
+            border-left: 4px solid #6c5ce7;
+            background: #f8f9fa;
+            font-size: 12pt;
+        }
+    `;
+    tempDiv.appendChild(style);
+    
+    const opt = {
+        margin: [10, 10, 10, 10],
+        filename: 'blog-post.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+            scale: 2,
+            useCORS: true,
+            logging: true,
+            letterRendering: true
+        },
+        jsPDF: { 
+            unit: 'mm', 
+            format: 'a4', 
+            orientation: 'portrait'
+        },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+
+    // Show loading state
+    const loadingText = document.createElement('div');
+    loadingText.textContent = 'Generating PDF...';
+    loadingText.style.position = 'fixed';
+    loadingText.style.top = '50%';
+    loadingText.style.left = '50%';
+    loadingText.style.transform = 'translate(-50%, -50%)';
+    loadingText.style.background = 'rgba(0, 0, 0, 0.8)';
+    loadingText.style.color = 'white';
+    loadingText.style.padding = '1rem 2rem';
+    loadingText.style.borderRadius = '5px';
+    loadingText.style.zIndex = '1000';
+    document.body.appendChild(loadingText);
+
+    // Generate PDF
+    html2pdf().set(opt).from(tempDiv).save().then(() => {
+        // Remove loading state
+        document.body.removeChild(loadingText);
+    }).catch(error => {
+        console.error('Error generating PDF:', error);
+        alert('There was an error generating the PDF. Please try again.');
+        document.body.removeChild(loadingText);
+    });
+});
+
+// Update the clear button functionality
+document.getElementById('clear-button').addEventListener('click', () => {
+    // Cancel any ongoing generation
+    if (generationController) {
+        generationController.abort();
+        generationController = null;
+    }
+
+    // Hide loading overlay
+    const loadingOverlay = document.getElementById('loading-overlay');
+    loadingOverlay.style.display = 'none';
+
+    // Clear the Quill editor content
+    quill.root.innerHTML = '<h2>Write a blog here or generate a blog using the chat section</h2>';
+    
+    // Clear the chat messages except the welcome message
+    const chatMessages = document.getElementById('chat-messages');
+    while (chatMessages.children.length > 1) {
+        chatMessages.removeChild(chatMessages.lastChild);
+    }
+    
+    // Clear the input
+    const chatInput = document.getElementById('user-input');
+    chatInput.value = '';
+    
+    // Clear only blog content from localStorage
+    localStorage.removeItem('BlogGenerated');
+});
+
+// Function to generate image prompts from blog content
+async function generateImagePromptsFromBlog() {
+    try {
+        // Get the saved blog content
+        const savedBlog = localStorage.getItem('BlogGenerated');
+        if (!savedBlog) {
+            throw new Error('No blog content found in localStorage');
+        }
+
+        // Create a temporary div to parse the HTML content
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = savedBlog;
+
+        // Extract headings and key paragraphs
+        const headings = Array.from(tempDiv.getElementsByTagName('h3')).map(h => h.textContent);
+        const paragraphs = Array.from(tempDiv.getElementsByTagName('p')).map(p => p.textContent);
+
+        // Create prompts based on the content
+        const prompts = [];
+        
+        // First prompt based on main heading
+        const mainHeading = tempDiv.getElementsByTagName('h1')[0]?.textContent;
+        if (mainHeading) {
+            prompts.push(`Create a professional and engaging image representing: ${mainHeading}`);
+        }
+
+        // Second prompt based on first subheading and its content
+        if (headings.length > 0 && paragraphs.length > 0) {
+            prompts.push(`Generate an illustrative image for: ${headings[0]} - ${paragraphs}`);
+        }
+
+        // Third prompt based on conclusion or last section
+        const conclusion = paragraphs[paragraphs.length - 1];
+        if (conclusion) {
+            prompts.push(`Create a visual representation of the conclusion: ${conclusion}`);
+        }
+
+        // Log the generated prompts
+        console.log('Generated Image Prompts:');
+        prompts.forEach((prompt, index) => {
+            console.log(`Prompt ${index + 1}:`, prompt);
+        });
+
+        // Generate images for each prompt
+        for (let i = 0; i < prompts.length; i++) {
+            const prompt = prompts[i];
+            addMessageToChat(`Generating image ${i + 1} based on: ${prompt}`, false);
+            
+            const imageUrls = await generateImage(prompt);
+            if (imageUrls && imageUrls.length > 0) {
+                // Add the generated image to the chat
+                addMessageToChat("Image generated successfully!", false, imageUrls);
+                
+                // Create image container with caption
+                const imageContainer = document.createElement('div');
+                imageContainer.className = 'blog-image-container';
+                imageContainer.style.margin = '2em 0';
+                imageContainer.style.textAlign = 'center';
+
+                // Create the image element
+                const img = document.createElement('img');
+                img.src = imageUrls[0];
+                img.alt = `Generated image ${i + 1}`;
+                img.style.maxWidth = '100%';
+                img.style.height = 'auto';
+                img.style.borderRadius = '8px';
+                img.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                img.style.marginBottom = '0.5em';
+
+                // Create caption
+                const caption = document.createElement('p');
+                caption.className = 'image-caption';
+                caption.style.fontSize = '0.9em';
+                caption.style.color = '#666';
+                caption.style.fontStyle = 'italic';
+                caption.style.margin = '0.5em 0';
+                caption.textContent = `Figure ${i + 1}: ${prompt}`;
+
+                // Add image and caption to container
+                imageContainer.appendChild(img);
+                imageContainer.appendChild(caption);
+
+                // Get current content
+                const currentContent = quill.root.innerHTML;
+                let newContent;
+
+                // Insert image at appropriate location
+                if (i === 0) {
+                    // Insert after main heading
+                    newContent = currentContent.replace('</h1>', `</h1>${imageContainer.outerHTML}`);
+                } else if (i === 1 && headings.length > 0) {
+                    // Insert after first subheading
+                    const headingIndex = currentContent.indexOf(headings[0]);
+                    if (headingIndex !== -1) {
+                        const afterHeading = currentContent.indexOf('</h3>', headingIndex) + 5;
+                        newContent = currentContent.slice(0, afterHeading) + imageContainer.outerHTML + currentContent.slice(afterHeading);
+                    }
+                } else {
+                    // Insert before conclusion
+                    const conclusionIndex = currentContent.lastIndexOf('<h2>');
+                    if (conclusionIndex !== -1) {
+                        newContent = currentContent.slice(0, conclusionIndex) + imageContainer.outerHTML + currentContent.slice(conclusionIndex);
+                    } else {
+                        newContent = currentContent + imageContainer.outerHTML;
+                    }
+                }
+
+                // Update the editor content
+                quill.root.innerHTML = newContent;
+
+                // Add a small delay between image generations
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        // Update localStorage with the new content including images
+        localStorage.setItem('BlogGenerated', quill.root.innerHTML);
+        
+        addMessageToChat("All images have been generated and added to your blog post!", false);
+    } catch (error) {
+        console.error('Error generating images:', error);
+        addMessageToChat("Sorry, there was an error generating the images. Please try again.", false);
+    }
+}
+
+// Add styles for the new button
+const style = document.createElement('style');
+style.textContent = `
+    .action-button {
+        background: #6c5ce7;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        margin-left: 10px;
+    }
+
+    .action-button:hover {
+        background: #5f4dd0;
+        transform: scale(1.05);
+    }
+`;
+document.head.appendChild(style);
+
+// Add styles for blog images
+const imageStyles = document.createElement('style');
+imageStyles.textContent = `
+    .blog-image-container {
+        text-align: center;
+    }
+
+    .blog-image-container img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        transition: transform 0.3s ease;
+    }
+
+    .blog-image-container img:hover {
+        transform: scale(1.02);
+    }
+
+    @media (max-width: 768px) {
+        .blog-image-container {
+            margin: 1.5em 0;
+        }
+
+        .blog-image-container img {
+            border-radius: 6px;
+        }
+    }
+`;
+document.head.appendChild(imageStyles);
+     </script>
+
+
+<!-- Update modal HTML -->
+<div class="modal-overlay" id="imageModal">
+    <div class="modal-content">
+        <h3 class="modal-title">Choose an option</h3>
+        <div class="modal-buttons">
+            <button class="modal-button primary" id="generateImageBtn">Generate Image using AI</button>
+            <button class="modal-button secondary" id="uploadImageBtn">Upload Image</button>
+        </div>
+        <div class="prompt-input-container" id="promptInputContainer">
+            <input type="text" class="prompt-input" id="promptInput" placeholder="Enter your image prompt here...">
+            <div class="prompt-actions">
+                <button class="modal-button secondary" id="cancelPromptBtn">Cancel</button>
+                <button class="modal-button primary" id="submitPromptBtn">Generate</button>
+            </div>
+        </div>
+        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
+    </div>
+</div>
+
+<script>
+// ... existing code ...
+
+document.addEventListener('DOMContentLoaded', function() {
+    const modal = document.getElementById('imageModal');
+    const generateImageBtn = document.getElementById('generateImageBtn');
+    const uploadImageBtn = document.getElementById('uploadImageBtn');
+    const promptInputContainer = document.getElementById('promptInputContainer');
+    const promptInput = document.getElementById('promptInput');
+    const cancelPromptBtn = document.getElementById('cancelPromptBtn');
+    const submitPromptBtn = document.getElementById('submitPromptBtn');
+    const imageUploadInput = document.getElementById('imageUploadInput');
+
+    // Function to show modal
+    function showModal() {
+        modal.style.display = 'flex';
+        // Reset prompt input container visibility
+        promptInputContainer.style.display = 'none';
+    }
+
+    // Function to hide modal
+    function hideModal() {
+        modal.style.display = 'none';
+        // Clear prompt input
+        promptInput.value = '';
+    }
+
+    // Add click event listener to the editor for placeholder images
+    document.querySelector('.ql-editor').addEventListener('click', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            showModal();
+        }
+    });
+
+    // Close modal when clicking outside
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            hideModal();
+        }
+    });
+
+    // Handle generate image button click
+    generateImageBtn.addEventListener('click', function() {
+        promptInputContainer.style.display = 'block';
+        promptInput.focus();
+    });
+
+    // Handle cancel prompt button click
+    cancelPromptBtn.addEventListener('click', function() {
+        promptInputContainer.style.display = 'none';
+        promptInput.value = '';
+    });
+
+    // Handle submit prompt button click
+    submitPromptBtn.addEventListener('click', async function() {
+        const prompt = promptInput.value.trim();
+        if (prompt) {
+            hideModal();
+            // Show loading state
+            addMessageToChat("Generating image based on your prompt...", false);
+            
+            try {
+                const imageUrls = await generateImage(prompt);
+                if (imageUrls && imageUrls.length > 0) {
+                    // Get the clicked placeholder image
+                    const clickedPlaceholder = document.querySelector('.ql-editor img[src="/assets/placeholder.svg"]');
+                    if (clickedPlaceholder) {
+                        // Replace the placeholder with the generated image
+                        clickedPlaceholder.src = imageUrls[0];
+                        clickedPlaceholder.style.opacity = '1';
+                        
+                        // Add the same hover effects to the new image
+                        clickedPlaceholder.style.transition = 'all 0.3s ease';
+                        clickedPlaceholder.style.cursor = 'pointer';
+                        
+                        // Add click event to the new image to show the modal
+                        clickedPlaceholder.addEventListener('click', function(e) {
+                            showModal();
+                        });
+                    }
+                } else {
+                    addMessageToChat("Sorry, there was an error generating the image.", false);
+                }
+            } catch (error) {
+                console.error('Error generating image:', error);
+                addMessageToChat("Sorry, there was an error generating the image.", false);
+            }
+        } else {
+            // Show error state in input
+            promptInput.style.borderColor = '#ff7675';
+            setTimeout(() => {
+                promptInput.style.borderColor = '#dfe6e9';
+            }, 2000);
+        }
+    });
+
+    // Handle upload image button click
+    uploadImageBtn.addEventListener('click', function() {
+        imageUploadInput.click();
+    });
+
+    // Handle file selection
+    imageUploadInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            // Check if file is an image
+            if (!file.type.startsWith('image/')) {
+                addMessageToChat("Please select an image file.", false);
+                return;
+            }
+
+            // Create a FileReader to read the image
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const imageUrl = e.target.result;
+                // Get the clicked placeholder image
+                const clickedPlaceholder = document.querySelector('.ql-editor img[src="/assets/placeholder.svg"]');
+                if (clickedPlaceholder) {
+                    // Replace the placeholder with the uploaded image
+                    clickedPlaceholder.src = imageUrl;
+                    clickedPlaceholder.style.opacity = '1';
+                    
+                    // Add the same hover effects to the new image
+                    clickedPlaceholder.style.transition = 'all 0.3s ease';
+                    clickedPlaceholder.style.cursor = 'pointer';
+                    
+                    // Add click event to the new image to show the modal
+                    clickedPlaceholder.addEventListener('click', function(e) {
+                        showModal();
+                    });
+                }
+                hideModal();
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // Add drag and drop functionality for images
+    const editor = document.querySelector('.ql-editor');
+    
+    // Make placeholder images draggable
+    editor.addEventListener('dragstart', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            e.dataTransfer.setData('text/plain', 'placeholder');
+        }
+    });
+
+    // Handle drag over placeholder images
+    editor.addEventListener('dragover', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            e.preventDefault();
+            e.target.style.opacity = '0.5';
+        }
+    });
+
+    // Handle drag leave
+    editor.addEventListener('dragleave', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            e.target.style.opacity = '1';
+        }
+    });
+
+    // Handle drop on placeholder images
+    editor.addEventListener('drop', function(e) {
+        e.preventDefault();
+        const targetImg = e.target;
+        
+        if (targetImg.tagName === 'IMG' && targetImg.src.includes('placeholder.svg')) {
+            // Get the dragged image URL from the chat
+            const draggedImg = document.querySelector('.chat-messages img:active') || 
+                             document.querySelector('.chat-messages img:hover');
+            
+            if (draggedImg) {
+                // Replace placeholder with the dragged image
+                targetImg.src = draggedImg.src;
+                targetImg.style.opacity = '1';
+                
+                // Add the same hover effects to the new image
+                targetImg.style.transition = 'all 0.3s ease';
+                targetImg.style.cursor = 'pointer';
+                
+                // Add click event to the new image to show the modal
+                targetImg.addEventListener('click', function(e) {
+                    showModal();
+                });
+            }
+        }
+    });
+
+    // Make chat images draggable
+    document.querySelector('.chat-messages').addEventListener('dragstart', function(e) {
+        if (e.target.tagName === 'IMG') {
+            e.dataTransfer.setData('text/plain', 'chat-image');
+            e.dataTransfer.setData('image-url', e.target.src);
+        }
+    });
+
+    // Add draggable attribute to chat images
+    document.querySelectorAll('.chat-messages img').forEach(img => {
+        img.draggable = true;
+    });
+});
+
+
+</script>
+</body>
+</html>
