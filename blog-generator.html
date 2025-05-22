@@ -11,6 +11,7 @@
     <!-- Add Quill dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/gh/hunghg255/quill-resize-module/dist/quill-resize-image.min.js"></script>
 </head>
 <body>
     <div class="blog-generator">
@@ -18,10 +19,6 @@
         <div class="chat-section">
             <div class="chat-header">
                 <h2>Chat with BlogMagic</h2>
-                <div class="chat-status">
-                    <span class="status-indicator"></span>
-                    <span>AI Assistant</span>
-                </div>
             </div>
             <div class="chat-messages" id="chat-messages">
                 <!-- Messages will be added here dynamically -->
@@ -56,6 +53,25 @@
             <div class="output-header">
                 <h2>Your Blog Post</h2>
                 <div class="output-actions">
+                    <div class="dropdown-container">
+                        <button class="action-button" id="generate-image-button">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        </button>
+                        <div class="dropdown-menu" id="headings-dropdown">
+                            <div class="dropdown-header">
+                                <h3>Select Section</h3>
+                                <button class="close-dropdown" title="Close">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                            <div class="dropdown-content">
+                                <!-- Headings will be added here dynamically -->
+                            </div>
+                            <div class="dropdown-footer">
+                                <button class="generate-all-btn">Generate All Images</button>
+                            </div>
+                        </div>
+                    </div>
                     <button class="action-button" id="copy-button">
                         <i class="fa-solid fa-copy"></i>
                     </button>
@@ -77,14 +93,40 @@
             </div>
         </div>
     </div>
+
+    
+    <!-- Update modal HTML -->
+    <div class="modal-overlay" id="imageModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Choose an option</h3>
+                <button class="close-modal-btn">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-button primary" id="generateImageBtn">Generate Image using AI</button>
+                <button class="modal-button secondary" id="uploadImageBtn">Upload Image</button>
+                <button class="modal-button danger" id="removeImageBtn">Remove Image</button>
+            </div>
+            <div class="prompt-input-container" id="promptInputContainer">
+                <input type="text" class="prompt-input" id="promptInput" placeholder="Enter your image prompt here...">
+                <div class="prompt-actions">
+                    <button class="modal-button secondary" id="cancelPromptBtn">Cancel</button>
+                    <button class="modal-button primary" id="submitPromptBtn">Generate</button>
+                </div>
+            </div>
+            <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
+        </div>
+    </div>
     <!-- <script src="script.js"></script> -->
      <script>
-        
- // Constants
-const API_URL = 'https://furpssgdgg.execute-api.us-east-1.amazonaws.com/default/llm_chat';
-
-// Add controller for cancellation
-let generationController = null;
+        // Register the resize module before initializing Quill
+        if (typeof QuillResizeImage !== 'undefined') {
+            Quill.register('modules/resize', QuillResizeImage);
+        } else {
+            console.error('QuillResizeImage module not loaded');
+        }
 
 // Initialize Quill editor
 const quill = new Quill('#editor', {
@@ -97,9 +139,38 @@ const quill = new Quill('#editor', {
             [{ 'color': [] }, { 'background': [] }],
             ['link', 'image'],
             ['clean']
-        ]
-    }
-});
+                ],
+                clipboard: {
+                    matchVisual: false,
+                    matchers: [
+                        ['img, iframe, video', function (node, delta) {
+                            const isImage = node.tagName.toLowerCase() === 'img';
+                            return {
+                                ops: [
+                                    { insert: '\n' },  // Single line before
+                                    {
+                                        insert: {
+                                            [node.tagName.toLowerCase() === 'img' ? 'image' : 'video']: node.src
+                                        }
+                                    },
+                                    // Add extra newline only for images
+                                    { insert: isImage ? '\n\n' : '\n' }
+                                ]
+                            };
+                        }]
+                    ]
+                },
+                resize: {
+                    locale: { center: "center" }
+                }
+            }
+        });
+
+        // Constants
+        const API_URL = 'https://furpssgdgg.execute-api.us-east-1.amazonaws.com/default/llm_chat';
+
+        // Add controller for cancellation
+        let generationController = null;
 
 // Load saved content when page loads
 document.addEventListener('DOMContentLoaded', function() {
@@ -129,6 +200,305 @@ document.addEventListener('DOMContentLoaded', function() {
         const sendButton = document.querySelector('.send-button');
         sendButton.click();
     }
+
+    const modal = document.getElementById('imageModal');
+    const generateImageBtn = document.getElementById('generateImageBtn');
+    const uploadImageBtn = document.getElementById('uploadImageBtn');
+    const removeImageBtn = document.getElementById('removeImageBtn');
+    const promptInputContainer = document.getElementById('promptInputContainer');
+    const promptInput = document.getElementById('promptInput');
+    const cancelPromptBtn = document.getElementById('cancelPromptBtn');
+    const submitPromptBtn = document.getElementById('submitPromptBtn');
+    const imageUploadInput = document.getElementById('imageUploadInput');
+
+            // Function to make element draggable
+            function makeDraggable(element) {
+                let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+                
+                // Make the modal header the drag handle
+                const dragHandle = element.querySelector('.modal-header');
+                if (dragHandle) {
+                    dragHandle.style.cursor = 'move';
+                    dragHandle.onmousedown = dragMouseDown;
+                }
+
+                function dragMouseDown(e) {
+                    // Don't start drag if clicking the close button
+                    if (e.target.closest('.close-modal-btn')) {
+                        return;
+                    }
+                    
+                    e.preventDefault();
+                    // Get the mouse cursor position at startup
+                    pos3 = e.clientX;
+                    pos4 = e.clientY;
+                    document.onmouseup = closeDragElement;
+                    // Call a function whenever the cursor moves
+                    document.onmousemove = elementDrag;
+                }
+
+                function elementDrag(e) {
+                    e.preventDefault();
+                    // Calculate the new cursor position
+                    pos1 = pos3 - e.clientX;
+                    pos2 = pos4 - e.clientY;
+                    pos3 = e.clientX;
+                    pos4 = e.clientY;
+                    // Set the element's new position
+                    element.style.top = (element.offsetTop - pos2) + "px";
+                    element.style.left = (element.offsetLeft - pos1) + "px";
+                }
+
+                function closeDragElement() {
+                    // Stop moving when mouse button is released
+                    document.onmouseup = null;
+                    document.onmousemove = null;
+                }
+            }
+
+    // Function to show modal
+            function showModal(e) {
+                const modal = document.getElementById('imageModal');
+                const modalContent = modal.querySelector('.modal-content');
+                const clickedImage = e.target;
+                
+                // Get the image's position and dimensions
+                const imageRect = clickedImage.getBoundingClientRect();
+                const editorRect = document.querySelector('.ql-editor').getBoundingClientRect();
+                
+                // Calculate position relative to the editor
+                const top = imageRect.bottom - editorRect.top;
+                const left = imageRect.left - editorRect.left;
+                
+                // Set modal content size to match image width
+                modalContent.style.width = `${imageRect.width}px`;
+                modalContent.style.minWidth = 'auto';
+                modalContent.style.maxWidth = 'none';
+                
+                // Position the modal content
+                modalContent.style.position = 'absolute';
+                modalContent.style.top = `${top + 10}px`;
+                modalContent.style.left = `${left}px`;
+                modalContent.style.transform = 'none';
+                
+                // Make modal content draggable
+                makeDraggable(modalContent);
+                
+                // Show the modal
+        modal.style.display = 'flex';
+                modal.style.position = 'absolute';
+                modal.style.top = '0';
+                modal.style.left = '0';
+                modal.style.width = '100%';
+                modal.style.height = '100%';
+                
+        // Reset prompt input container visibility
+                document.getElementById('promptInputContainer').style.display = 'none';
+    }
+
+    // Function to hide modal
+    function hideModal() {
+                const modal = document.getElementById('imageModal');
+        modal.style.display = 'none';
+        // Clear prompt input
+        promptInput.value = '';
+    }
+
+            // Update the click event listener for images
+    document.querySelector('.ql-editor').addEventListener('click', function(e) {
+        if (e.target.tagName === 'IMG') {
+            // Remove data-clicked attribute from all images
+            document.querySelectorAll('.ql-editor img').forEach(img => {
+                img.removeAttribute('data-clicked');
+            });
+            // Add data-clicked attribute to the clicked image
+            e.target.setAttribute('data-clicked', 'true');
+                    showModal(e);
+        }
+    });
+
+    // Close modal when clicking outside
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            hideModal();
+        }
+    });
+
+    // Handle generate image button click
+    generateImageBtn.addEventListener('click', function() {
+        promptInputContainer.style.display = 'block';
+        promptInput.focus();
+    });
+
+    // Handle cancel prompt button click
+    cancelPromptBtn.addEventListener('click', function() {
+        promptInputContainer.style.display = 'none';
+        promptInput.value = '';
+    });
+
+    // Handle submit prompt button click
+    submitPromptBtn.addEventListener('click', async function() {
+        const prompt = promptInput.value.trim();
+        if (prompt) {
+            // Add loading state to the button
+            submitPromptBtn.classList.add('loading');
+            const originalText = submitPromptBtn.innerHTML;
+            submitPromptBtn.innerHTML = '<span class="button-text">Generating...</span>';
+            
+            hideModal();
+            // Show loading state
+            addMessageToChat("Generating image based on your prompt...", false);
+            
+            try {
+                const imageUrls = await generateImage(prompt);
+                if (imageUrls && imageUrls.length > 0) {
+                    // Get the clicked image (stored when modal was opened)
+                    const clickedImage = document.querySelector('.ql-editor img[data-clicked="true"]');
+                    if (clickedImage) {
+                        // Replace the clicked image with the generated image
+                        clickedImage.src = imageUrls[0];
+                        clickedImage.style.opacity = '1';
+                        clickedImage.removeAttribute('data-clicked');
+                        
+                        // Add the same hover effects to the new image
+                        clickedImage.style.transition = 'all 0.3s ease';
+                        clickedImage.style.cursor = 'pointer';
+                    }
+                } else {
+                    addMessageToChat("Sorry, there was an error generating the image.", false);
+                }
+            } catch (error) {
+                console.error('Error generating image:', error);
+                addMessageToChat("Sorry, there was an error generating the image.", false);
+            } finally {
+                // Remove loading state
+                submitPromptBtn.classList.remove('loading');
+                submitPromptBtn.innerHTML = originalText;
+            }
+        } else {
+            // Show error state in input
+            promptInput.style.borderColor = '#ff7675';
+            setTimeout(() => {
+                promptInput.style.borderColor = '#dfe6e9';
+            }, 2000);
+        }
+    });
+
+    // Handle upload image button click
+    uploadImageBtn.addEventListener('click', function() {
+        imageUploadInput.click();
+    });
+
+    // Handle file selection
+    imageUploadInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            // Check if file is an image
+            if (!file.type.startsWith('image/')) {
+                addMessageToChat("Please select an image file.", false);
+                return;
+            }
+
+            // Create a FileReader to read the image
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const imageUrl = e.target.result;
+                // Get the clicked image
+                const clickedImage = document.querySelector('.ql-editor img[data-clicked="true"]');
+                if (clickedImage) {
+                    // Replace the clicked image with the uploaded image
+                    clickedImage.src = imageUrl;
+                    clickedImage.style.opacity = '1';
+                    
+                    // Add the same hover effects to the new image
+                    clickedImage.style.transition = 'all 0.3s ease';
+                    clickedImage.style.cursor = 'pointer';
+                }
+                hideModal();
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // Add drag and drop functionality for images
+    const editor = document.querySelector('.ql-editor');
+    
+    // Make placeholder images draggable
+    editor.addEventListener('dragstart', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            e.dataTransfer.setData('text/plain', 'placeholder');
+        }
+    });
+
+    // Handle drag over placeholder images
+    editor.addEventListener('dragover', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            e.preventDefault();
+            e.target.style.opacity = '0.5';
+        }
+    });
+
+    // Handle drag leave
+    editor.addEventListener('dragleave', function(e) {
+        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
+            e.target.style.opacity = '1';
+        }
+    });
+
+    // Handle drop on placeholder images
+    editor.addEventListener('drop', function(e) {
+        e.preventDefault();
+        const targetImg = e.target;
+        
+        if (targetImg.tagName === 'IMG' && targetImg.src.includes('placeholder.svg')) {
+            // Get the dragged image URL from the chat
+            const draggedImg = document.querySelector('.chat-messages img:active') || 
+                             document.querySelector('.chat-messages img:hover');
+            
+            if (draggedImg) {
+                // Replace placeholder with the dragged image
+                targetImg.src = draggedImg.src;
+                targetImg.style.opacity = '1';
+                
+                // Add the same hover effects to the new image
+                targetImg.style.transition = 'all 0.3s ease';
+                targetImg.style.cursor = 'pointer';
+                
+                // Add click event to the new image to show the modal
+                targetImg.addEventListener('click', function(e) {
+                            showModal(e);
+                });
+            }
+        }
+    });
+
+    // Make chat images draggable
+    document.querySelector('.chat-messages').addEventListener('dragstart', function(e) {
+        if (e.target.tagName === 'IMG') {
+            e.dataTransfer.setData('text/plain', 'chat-image');
+            e.dataTransfer.setData('image-url', e.target.src);
+        }
+    });
+
+    // Add draggable attribute to chat images
+    document.querySelectorAll('.chat-messages img').forEach(img => {
+        img.draggable = true;
+    });
+
+    // Handle remove image button click
+    removeImageBtn.addEventListener('click', function() {
+        const clickedImage = document.querySelector('.ql-editor img[data-clicked="true"]');
+        if (clickedImage) {
+            // Remove the image
+            clickedImage.remove();
+            // Update localStorage
+            localStorage.setItem('BlogGenerated', quill.root.innerHTML);
+            // Hide modal
+            hideModal();
+            // Show success message
+            addMessageToChat("Image has been removed successfully.", false);
+        }
+    });
 });
 
 // Function to add a message to the chat
@@ -246,37 +616,40 @@ async function generateContent(prompt) {
         // Create new AbortController for this generation
         generationController = new AbortController();
         const signal = generationController.signal;
-
+        
         const query = [
             { role: "system", content: `
-                Okay, AI, from this point forward, you are an HTML Blog Generator.
+            Okay, AI, from this point forward, you are an HTML Blog Generator.
+            Your sole purpose is to generate complete blog posts in HTML format based on the topics and requirements I provide.
 
-                Your sole purpose is to generate complete blog posts in HTML format based on the topics and requirements I provide.
+            Here are the strict rules for every blog post you generate:
 
-                Here are the strict rules for every blog post you generate:
-                
-                Overall Output Format: The entire response MUST be a well-formed HTML snippet. Do not include any text or explanations outside of the HTML code itself, unless it's within HTML comments <!-- like this --> for your own structural notes if absolutely necessary (but preferably not).
-
-                Main Heading:
-                
+            Overall Output Format:
+                The entire response MUST be a well-formed HTML snippet.
+                Do not include any text or explanations outside of the HTML code itself, unless it's within HTML comments <!-- like this --> for your own structural notes if absolutely necessary (but preferably not).
+            
+             Main Heading:
                 The main blog title MUST be enclosed within an <h1> tag.
                 The text of the heading itself (inside the <h1> tags) MUST NOT use any additional formatting tags like <b> or <strong>.
                 The heading must be UNIQUE and MUST NOT BE SIMILAR TO THE USER'S PROMPT.
                     
                 Example: <h1>This is the Main Blog Title</h1>
 
+                VERY IMPORTANT: REMOVE ALL THE EMPTY <p> tags.
+
                 Topic Description (Post-Heading):
                 Immediately following the <h1> heading, you MUST provide a descriptive paragraph of approximately 100 words about the main topic of the blog.
                 This description should be enclosed in <p> tags.
                 Subheadings:
-                IMPORTANT: There must be at least 3 subheadings.
+                IMPORTANT: There must be atleast 3 subheadings.
                 The blog post MUST include relevant subheadings to structure the content.
                 Each subheading MUST be enclosed within an <h3> tag.
                 Example: <h3>This is a Subheading</h3>
+
                 Subheading Content:
-                Immediately following each <h3> subheading, you MUST provide a detailed description or elaboration related to that subheading. IMPORTANT:Give a class to the h3 tag as ".subheading".
+                Immediately following each <h3> subheading, you MUST provide a detailed description or elaboration related to that subheading.
                 This content for each subheading should be approximately 100-150 words long.
-                This content should be enclosed in <p> tags. You may use multiple <p> tags if logically appropriate to hit the word count and maintain readability.
+                This content should be enclosed in <p> tags.
 
                 Conclusion:
                 The blog post MUST end with a conclusion section.
@@ -287,19 +660,22 @@ async function generateContent(prompt) {
                 Structure and Cleanliness:
                 The entire blog post must be well-structured and logically organized.
                 CRITICALLY IMPORTANT: Your HTML output must be clean. This means:
+
                 NO unnecessary asterisks (*).
 
                 NO unnecessary hash symbols (#).
 
                 NO unnecessary leading/trailing spaces within text content.
                 
+                IMPORTANT: IF THERE ARE "\n" twice remove it.
+
                 NO unnecessary extra line breaks or spaces between HTML tags unless it genuinely improves readability of the raw HTML (e.g., indenting nested elements is fine, but random blank lines between paragraphs are not).
 
                 Use standard HTML tags like <p> for paragraphs.
 
                 IMPORTANT: The blog post must be 2000 words or more.
 
-                VERY IMPORTANT: Remove the first paragraph of the blog post.
+                VERY IMPORTANT: Remove the empty paragraphs of the blog post.
 
                 VERY IMPORTANT: The blog post must be in A4 format.
 
@@ -381,9 +757,10 @@ function replaceImagePlaceholders(imageUrl) {
         newImage.style.height = 'auto';
         newImage.style.borderRadius = '8px';
         newImage.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-        newImage.style.margin = '2em 0';
+        newImage.style.margin = '2em 2em';
         newImage.style.transition = 'transform 0.3s ease';
-        
+        newImage.style.width = '300px';
+        newImage.style.cursor = 'pointer';
         // Add hover effect
         newImage.addEventListener('mouseover', () => {
             newImage.style.transform = 'scale(1.02)';
@@ -423,6 +800,7 @@ async function generateImage(prompt) {
                 n: 1,
                 guidance_scale: 20,
                 num_inference_steps: 50,
+                seed: 42,
                 response_format: "b64_json",
                 negative_prompt: "blurry, low quality, distorted, text, watermark, signature, ugly, deformed, disfigured, poorly drawn face, mutation, mutated, extra limb, missing limb, floating limbs, disconnected limbs, malformed hands, blur, out of focus, long neck, long body, distorted proportions, bad anatomy, bad proportions, gross proportions, text, error, missing fingers, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
             })
@@ -482,6 +860,10 @@ async function handleSendMessage(event) {
         loadingOverlay.style.display = 'flex';
         
         try {
+            // Show initial blog generation message
+            const loadingText = loadingOverlay.querySelector('p');
+            loadingText.innerHTML = 'Generating your blog post<span class="loading-dots"></span>';
+            
             // Generate and update content
             const content = await generateContent(message);
             
@@ -497,13 +879,7 @@ async function handleSendMessage(event) {
             addMessageToChat("Great! I've generated your blog post. Now, let me create some relevant images to enhance your content...", false);
 
             // Update loading text for image generation
-            const loadingText = loadingOverlay.querySelector('p');
-            loadingText.classList.add('fade-out');
-            setTimeout(() => {
-                loadingText.innerHTML = 'Generating images for the blog<span class="loading-dots"></span>';
-                loadingText.classList.remove('fade-out');
-                loadingText.classList.add('fade-in');
-            }, 500);
+            loadingText.innerHTML = 'Generating images for the blog<span class="loading-dots"></span>';
 
             // Generate and log image prompts
             const tempDiv = document.createElement('div');
@@ -538,7 +914,7 @@ async function handleSendMessage(event) {
                 const mainContent = paragraphs[0].substring(0, 150);
                 const conclusion = paragraphs[paragraphs.length - 1].substring(0, 150);
                 prompts.push(`Create a detailed and professional image for the main content: ${mainContent}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`);
-                prompts.push(`Create a detailed and professional image for the conclusion: ${conclusion}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post conclusion.`);
+                prompts.push(`Create a detailed and professional image for the conclusion: ${conclusion[conclusion.length - 1].substring(0, 150)}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post conclusion.`);
             } else {
                 prompts.push(`Create a detailed and professional image for the topic: ${message}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`);
                 prompts.push(`Create a detailed and professional image for the key concept: ${message}. Style: modern, clean, and visually appealing. Make it suitable for a professional blog post.`);
@@ -961,6 +1337,14 @@ style.textContent = `
         background: #5f4dd0;
         transform: scale(1.05);
     }
+
+    #generate-image-button {
+        background: #00b894;
+    }
+
+    #generate-image-button:hover {
+        background: #00a884;
+    }
 `;
 document.head.appendChild(style);
 
@@ -994,232 +1378,744 @@ imageStyles.textContent = `
     }
 `;
 document.head.appendChild(imageStyles);
-     </script>
 
-
-<!-- Update modal HTML -->
-<div class="modal-overlay" id="imageModal">
-    <div class="modal-content">
-        <h3 class="modal-title">Choose an option</h3>
-        <div class="modal-buttons">
-            <button class="modal-button primary" id="generateImageBtn">Generate Image using AI</button>
-            <button class="modal-button secondary" id="uploadImageBtn">Upload Image</button>
-        </div>
-        <div class="prompt-input-container" id="promptInputContainer">
-            <input type="text" class="prompt-input" id="promptInput" placeholder="Enter your image prompt here...">
-            <div class="prompt-actions">
-                <button class="modal-button secondary" id="cancelPromptBtn">Cancel</button>
-                <button class="modal-button primary" id="submitPromptBtn">Generate</button>
-            </div>
-        </div>
-        <input type="file" id="imageUploadInput" accept="image/*" style="display: none;">
-    </div>
-</div>
-
-<script>
-// ... existing code ...
-
-document.addEventListener('DOMContentLoaded', function() {
-    const modal = document.getElementById('imageModal');
-    const generateImageBtn = document.getElementById('generateImageBtn');
-    const uploadImageBtn = document.getElementById('uploadImageBtn');
-    const promptInputContainer = document.getElementById('promptInputContainer');
-    const promptInput = document.getElementById('promptInput');
-    const cancelPromptBtn = document.getElementById('cancelPromptBtn');
-    const submitPromptBtn = document.getElementById('submitPromptBtn');
-    const imageUploadInput = document.getElementById('imageUploadInput');
-
-    // Function to show modal
-    function showModal() {
-        modal.style.display = 'flex';
-        // Reset prompt input container visibility
-        promptInputContainer.style.display = 'none';
+// Add styles for action buttons
+const actionButtonStyles = document.createElement('style');
+actionButtonStyles.textContent = `
+    .output-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
 
-    // Function to hide modal
-    function hideModal() {
-        modal.style.display = 'none';
-        // Clear prompt input
-        promptInput.value = '';
+    .action-button {
+        background: #6c5ce7;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        margin-left: 10px;
+        opacity: 1;
+        visibility: visible;
     }
 
-    // Add click event listener to the editor for placeholder images
-    document.querySelector('.ql-editor').addEventListener('click', function(e) {
-        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
-            showModal();
+    .action-button.loading {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    .action-button:hover {
+        background: #5f4dd0;
+        transform: scale(1.05);
+    }
+
+    #generate-image-button {
+        background: #00b894;
+    }
+
+    #generate-image-button:hover {
+        background: #00a884;
+    }
+
+    #removeImageBtn {
+        background: #e74c3c;
+        color: white;
+    }
+
+    #removeImageBtn:hover {
+        background: #c0392b;
+    }
+`;
+document.head.appendChild(actionButtonStyles);
+
+// Function to toggle action buttons visibility
+function toggleActionButtons(show) {
+    const actionButtons = document.querySelectorAll('.action-button');
+    actionButtons.forEach(button => {
+        if (show) {
+            button.classList.remove('loading');
+        } else {
+            button.classList.add('loading');
         }
     });
+}
 
-    // Close modal when clicking outside
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            hideModal();
-        }
-    });
-
-    // Handle generate image button click
-    generateImageBtn.addEventListener('click', function() {
-        promptInputContainer.style.display = 'block';
-        promptInput.focus();
-    });
-
-    // Handle cancel prompt button click
-    cancelPromptBtn.addEventListener('click', function() {
-        promptInputContainer.style.display = 'none';
-        promptInput.value = '';
-    });
-
-    // Handle submit prompt button click
-    submitPromptBtn.addEventListener('click', async function() {
-        const prompt = promptInput.value.trim();
-        if (prompt) {
-            hideModal();
-            // Show loading state
-            addMessageToChat("Generating image based on your prompt...", false);
+// Update the heading item click handler
+document.getElementById('generate-image-button').addEventListener('click', function(e) {
+    e.stopPropagation();
+    const dropdown = document.getElementById('headings-dropdown');
+    const dropdownContent = dropdown.querySelector('.dropdown-content');
+    
+    // Clear previous content
+    dropdownContent.innerHTML = '';
+    
+    // Get all h3 headings
+    const headings = Array.from(quill.root.getElementsByTagName('h3'));
+    
+    if (headings.length > 0) {
+        // Add each heading to the dropdown
+        headings.forEach((heading, index) => {
+            const headingItem = document.createElement('div');
+            headingItem.className = 'heading-item';
+            headingItem.innerHTML = `
+                <i class="fa-solid fa-image"></i>
+                <span>${heading.textContent.trim()}</span>
+            `;
             
-            try {
-                const imageUrls = await generateImage(prompt);
-                if (imageUrls && imageUrls.length > 0) {
-                    // Get the clicked placeholder image
-                    const clickedPlaceholder = document.querySelector('.ql-editor img[src="/assets/placeholder.svg"]');
-                    if (clickedPlaceholder) {
-                        // Replace the placeholder with the generated image
-                        clickedPlaceholder.src = imageUrls[0];
-                        clickedPlaceholder.style.opacity = '1';
+            // Add click handler for individual heading
+            headingItem.addEventListener('click', async function() {
+                dropdown.style.display = 'none';
+                
+                // Hide action buttons during loading
+                toggleActionButtons(false);
+                
+                // Show loading state with specific heading info
+                const loadingOverlay = document.getElementById('loading-overlay');
+                const loadingText = loadingOverlay.querySelector('p');
+                loadingText.innerHTML = `Generating image for section: "${heading.textContent.trim()}"<span class="loading-dots"></span>`;
+                loadingOverlay.style.display = 'flex';
+                
+                try {
+                    // Get the heading text
+                    const headingText = heading.textContent.trim();
+                    addMessageToChat(`Generating image for: ${headingText}...`, false);
+                    
+                    // Update loading text to show progress
+                    loadingText.innerHTML = `Creating AI image for "${headingText}"<span class="loading-dots"></span>`;
+                    
+                    // Generate image based on heading
+                    const imageUrls = await generateImage(headingText);
+                    
+                    if (imageUrls && imageUrls.length > 0) {
+                        // Update loading text to show processing
+                        loadingText.innerHTML = `Processing and optimizing image for "${headingText}"<span class="loading-dots"></span>`;
                         
-                        // Add the same hover effects to the new image
-                        clickedPlaceholder.style.transition = 'all 0.3s ease';
-                        clickedPlaceholder.style.cursor = 'pointer';
+                        // Create image container
+                        const imageContainer = document.createElement('div');
+                        imageContainer.className = 'blog-image-container';
+                        imageContainer.style.margin = '2em 0';
+                        imageContainer.style.textAlign = 'center';
+
+                        // Create the image element
+                        const img = document.createElement('img');
+                        img.src = imageUrls[0];
+                        img.alt = `Generated image for ${headingText}`;
+                        img.style.maxWidth = '100%';
+                        img.style.height = 'auto';
+                        img.style.borderRadius = '8px';
+                        img.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                        img.style.marginBottom = '0.5em';
+                        img.style.cursor = 'pointer';
+
+                        // Create caption
+                        const caption = document.createElement('p');
+                        caption.className = 'image-caption';
+                        caption.style.fontSize = '0.9em';
+                        caption.style.color = '#666';
+                        caption.style.fontStyle = 'italic';
+                        caption.style.margin = '0.5em 0';
+                        caption.textContent = `Figure: ${headingText}`;
+
+                        // Add image and caption to container
+                        imageContainer.appendChild(img);
+                        imageContainer.appendChild(caption);
+
+                        // Insert after the heading
+                        heading.parentNode.insertBefore(imageContainer, heading.nextSibling);
                         
-                        // Add click event to the new image to show the modal
-                        clickedPlaceholder.addEventListener('click', function(e) {
-                            showModal();
-                        });
+                        // Update localStorage
+                        localStorage.setItem('BlogGenerated', quill.root.innerHTML);
+                        
+                        // Update loading text to show completion
+                        loadingText.innerHTML = `Image generated successfully for "${headingText}"!`;
+                        setTimeout(() => {
+                            loadingOverlay.style.display = 'none';
+                            // Show action buttons again
+                            toggleActionButtons(true);
+                        }, 1000);
+                        
+                        addMessageToChat("Image generated successfully!", false, imageUrls);
                     }
-                } else {
+                } catch (error) {
+                    console.error('Error generating image:', error);
+                    loadingText.innerHTML = `Error generating image for "${heading.textContent.trim()}"`;
+                    setTimeout(() => {
+                        loadingOverlay.style.display = 'none';
+                        // Show action buttons again
+                        toggleActionButtons(true);
+                    }, 2000);
                     addMessageToChat("Sorry, there was an error generating the image.", false);
                 }
-            } catch (error) {
-                console.error('Error generating image:', error);
-                addMessageToChat("Sorry, there was an error generating the image.", false);
-            }
-        } else {
-            // Show error state in input
-            promptInput.style.borderColor = '#ff7675';
-            setTimeout(() => {
-                promptInput.style.borderColor = '#dfe6e9';
-            }, 2000);
-        }
-    });
-
-    // Handle upload image button click
-    uploadImageBtn.addEventListener('click', function() {
-        imageUploadInput.click();
-    });
-
-    // Handle file selection
-    imageUploadInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            // Check if file is an image
-            if (!file.type.startsWith('image/')) {
-                addMessageToChat("Please select an image file.", false);
-                return;
-            }
-
-            // Create a FileReader to read the image
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const imageUrl = e.target.result;
-                // Get the clicked placeholder image
-                const clickedPlaceholder = document.querySelector('.ql-editor img[src="/assets/placeholder.svg"]');
-                if (clickedPlaceholder) {
-                    // Replace the placeholder with the uploaded image
-                    clickedPlaceholder.src = imageUrl;
-                    clickedPlaceholder.style.opacity = '1';
-                    
-                    // Add the same hover effects to the new image
-                    clickedPlaceholder.style.transition = 'all 0.3s ease';
-                    clickedPlaceholder.style.cursor = 'pointer';
-                    
-                    // Add click event to the new image to show the modal
-                    clickedPlaceholder.addEventListener('click', function(e) {
-                        showModal();
-                    });
-                }
-                hideModal();
-            };
-            reader.readAsDataURL(file);
-        }
-    });
-
-    // Add drag and drop functionality for images
-    const editor = document.querySelector('.ql-editor');
-    
-    // Make placeholder images draggable
-    editor.addEventListener('dragstart', function(e) {
-        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
-            e.dataTransfer.setData('text/plain', 'placeholder');
-        }
-    });
-
-    // Handle drag over placeholder images
-    editor.addEventListener('dragover', function(e) {
-        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
-            e.preventDefault();
-            e.target.style.opacity = '0.5';
-        }
-    });
-
-    // Handle drag leave
-    editor.addEventListener('dragleave', function(e) {
-        if (e.target.tagName === 'IMG' && e.target.src.includes('placeholder.svg')) {
-            e.target.style.opacity = '1';
-        }
-    });
-
-    // Handle drop on placeholder images
-    editor.addEventListener('drop', function(e) {
-        e.preventDefault();
-        const targetImg = e.target;
-        
-        if (targetImg.tagName === 'IMG' && targetImg.src.includes('placeholder.svg')) {
-            // Get the dragged image URL from the chat
-            const draggedImg = document.querySelector('.chat-messages img:active') || 
-                             document.querySelector('.chat-messages img:hover');
+            });
             
-            if (draggedImg) {
-                // Replace placeholder with the dragged image
-                targetImg.src = draggedImg.src;
-                targetImg.style.opacity = '1';
-                
-                // Add the same hover effects to the new image
-                targetImg.style.transition = 'all 0.3s ease';
-                targetImg.style.cursor = 'pointer';
-                
-                // Add click event to the new image to show the modal
-                targetImg.addEventListener('click', function(e) {
-                    showModal();
-                });
-            }
-        }
-    });
-
-    // Make chat images draggable
-    document.querySelector('.chat-messages').addEventListener('dragstart', function(e) {
-        if (e.target.tagName === 'IMG') {
-            e.dataTransfer.setData('text/plain', 'chat-image');
-            e.dataTransfer.setData('image-url', e.target.src);
-        }
-    });
-
-    // Add draggable attribute to chat images
-    document.querySelectorAll('.chat-messages img').forEach(img => {
-        img.draggable = true;
-    });
+            dropdownContent.appendChild(headingItem);
+        });
+        
+        // Show dropdown
+        dropdown.style.display = 'block';
+    } else {
+        addMessageToChat("No sections found to generate images for.", false);
+    }
 });
 
+// Update close handlers to remove overlay references
+document.querySelector('.close-dropdown').addEventListener('click', function() {
+    document.getElementById('headings-dropdown').style.display = 'none';
+});
 
-</script>
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const dropdown = document.getElementById('headings-dropdown');
+    const generateButton = document.getElementById('generate-image-button');
+    
+    if (!dropdown.contains(e.target) && !generateButton.contains(e.target)) {
+        dropdown.style.display = 'none';
+    }
+});
+
+// Update generate all button click handler to also hide action buttons
+document.querySelector('.generate-all-btn').addEventListener('click', async function() {
+    const dropdown = document.getElementById('headings-dropdown');
+    dropdown.style.display = 'none';
+    
+    // Hide action buttons during loading
+    toggleActionButtons(false);
+    
+    // Show loading state
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingText = loadingOverlay.querySelector('p');
+    loadingOverlay.style.display = 'flex';
+    
+    try {
+        // Get all h3 headings
+        const headings = Array.from(quill.root.getElementsByTagName('h3'));
+        
+        if (headings.length > 0) {
+            addMessageToChat("Generating images for all sections...", false);
+            
+            // Create an array to store all generated images
+            const generatedImages = [];
+            
+            // Generate images for each heading
+            for (let i = 0; i < headings.length; i++) {
+                const heading = headings[i];
+                const headingText = heading.textContent.trim();
+                
+                // Update loading text to show current progress
+                loadingText.innerHTML = `Generating image ${i + 1} of ${headings.length}: "${headingText}"<span class="loading-dots"></span>`;
+                addMessageToChat(`Generating image for: ${headingText}...`, false);
+                
+                // Update loading text to show creation progress
+                loadingText.innerHTML = `Creating AI image ${i + 1} of ${headings.length}: "${headingText}"<span class="loading-dots"></span>`;
+                
+                const imageUrls = await generateImage(headingText);
+                
+                if (imageUrls && imageUrls.length > 0) {
+                    // Store the generated image info
+                    generatedImages.push({
+                        url: imageUrls[0],
+                        heading: headingText,
+                        index: i + 1
+                    });
+                    
+                    // Update loading text to show processing
+                    loadingText.innerHTML = `Processing image ${i + 1} of ${headings.length}: "${headingText}"<span class="loading-dots"></span>`;
+                    
+                    // Create image container
+                    const imageContainer = document.createElement('div');
+                    imageContainer.className = 'blog-image-container';
+                    imageContainer.style.margin = '2em 0';
+                    imageContainer.style.textAlign = 'center';
+
+                    // Create the image element
+                    const img = document.createElement('img');
+                    img.src = imageUrls[0];
+                    img.alt = `Generated image for ${headingText}`;
+                    img.style.maxWidth = '100%';
+                    img.style.height = 'auto';
+                    img.style.borderRadius = '8px';
+                    img.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                    img.style.marginBottom = '0.5em';
+                    img.style.cursor = 'pointer';
+
+                    // Create caption
+                    const caption = document.createElement('p');
+                    caption.className = 'image-caption';
+                    caption.style.fontSize = '0.9em';
+                    caption.style.color = '#666';
+                    caption.style.fontStyle = 'italic';
+                    caption.style.margin = '0.5em 0';
+                    caption.textContent = `Figure: ${headingText}`;
+
+                    // Add image and caption to container
+                    imageContainer.appendChild(img);
+                    imageContainer.appendChild(caption);
+
+                    // Insert after the heading
+                    heading.parentNode.insertBefore(imageContainer, heading.nextSibling);
+                    
+                    // Update loading text to show completion of current image
+                    loadingText.innerHTML = `Completed image ${i + 1} of ${headings.length}: "${headingText}"`;
+                    
+                    // Add a small delay to show the completion message
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+            }
+            
+            // Update localStorage
+            localStorage.setItem('BlogGenerated', quill.root.innerHTML);
+            
+            // Show final completion message
+            loadingText.innerHTML = `All ${headings.length} images have been generated successfully!`;
+            
+            // Display all generated images in the chat
+            if (generatedImages.length > 0) {
+                // Create a container for all images
+                const allImagesContainer = document.createElement('div');
+                allImagesContainer.className = 'all-images-container';
+                allImagesContainer.style.margin = '1em 0';
+                
+                // Add a header for the images
+                const header = document.createElement('h3');
+                header.textContent = 'Generated Images';
+                header.style.marginBottom = '1em';
+                header.style.color = '#2d3436';
+                allImagesContainer.appendChild(header);
+                
+                // Add each image with its caption
+                generatedImages.forEach(img => {
+                    const imageWrapper = document.createElement('div');
+                    imageWrapper.style.marginBottom = '2em';
+                    imageWrapper.style.textAlign = 'center';
+                    
+                    const imgElement = document.createElement('img');
+                    imgElement.src = img.url;
+                    imgElement.alt = `Generated image for ${img.heading}`;
+                    imgElement.style.maxWidth = '100%';
+                    imgElement.style.height = 'auto';
+                    imgElement.style.borderRadius = '8px';
+                    imgElement.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                    imgElement.style.marginBottom = '0.5em';
+                    
+                    const caption = document.createElement('p');
+                    caption.textContent = `Image ${img.index}: ${img.heading}`;
+                    caption.style.fontSize = '0.9em';
+                    caption.style.color = '#666';
+                    caption.style.fontStyle = 'italic';
+                    caption.style.margin = '0.5em 0';
+                    
+                    imageWrapper.appendChild(imgElement);
+                    imageWrapper.appendChild(caption);
+                    allImagesContainer.appendChild(imageWrapper);
+                });
+                
+                // Add the images to the chat
+                addMessageToChat("Here are all the generated images:", false);
+                const chatMessages = document.getElementById('chat-messages');
+                const lastMessage = chatMessages.lastElementChild;
+                if (lastMessage) {
+                    lastMessage.querySelector('.message-content').appendChild(allImagesContainer);
+                }
+            }
+            
+            setTimeout(() => {
+                loadingOverlay.style.display = 'none';
+                // Show action buttons again
+                toggleActionButtons(true);
+            }, 2000);
+            
+            addMessageToChat("All images have been generated successfully!", false);
+        }
+    } catch (error) {
+        console.error('Error generating images:', error);
+        loadingText.innerHTML = `Error generating images. Please try again.`;
+        setTimeout(() => {
+            loadingOverlay.style.display = 'none';
+            // Show action buttons again
+            toggleActionButtons(true);
+        }, 2000);
+        addMessageToChat("Sorry, there was an error generating the images.", false);
+    }
+});
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const dropdown = document.getElementById('headings-dropdown');
+    const generateButton = document.getElementById('generate-image-button');
+    
+    if (!dropdown.contains(e.target) && !generateButton.contains(e.target)) {
+        dropdown.style.display = 'none';
+    }
+});
+
+// Add styles for loading dots animation
+const loadingStyles = document.createElement('style');
+loadingStyles.textContent = `
+    .loading-dots::after {
+        content: '...';
+        animation: loadingDots 1.5s infinite;
+        display: inline-block;
+        width: 20px;
+        text-align: left;
+    }
+
+    @keyframes loadingDots {
+        0% { content: '.'; }
+        33% { content: '..'; }
+        66% { content: '...'; }
+    }
+
+    #loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.95);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        flex-direction: column;
+        backdrop-filter: blur(5px);
+        border-radius: 8px;
+    }
+
+    .blog-output {
+        position: relative;
+    }
+
+    #loading-overlay p {
+        margin-top: 20px;
+        font-size: 16px;
+        color: #2d3436;
+        text-align: center;
+        max-width: 80%;
+        line-height: 1.5;
+        font-weight: 500;
+    }
+
+    .loading-spinner {
+        width: 60px;
+        height: 60px;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .loading-spinner i {
+        font-size: 32px;
+        color: #6c5ce7;
+        animation: twinkle 2s ease-in-out infinite;
+    }
+
+    @keyframes twinkle {
+        0% {
+            transform: scale(1);
+            opacity: 1;
+            text-shadow: 0 0 20px rgba(108, 92, 231, 0.5);
+        }
+        50% {
+            transform: scale(1.1);
+            opacity: 0.8;
+            text-shadow: 0 0 30px rgba(108, 92, 231, 0.8);
+        }
+        100% {
+            transform: scale(1);
+            opacity: 1;
+            text-shadow: 0 0 20px rgba(108, 92, 231, 0.5);
+        }
+    }
+
+    .fade-in {
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    .fade-out {
+        animation: fadeOut 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeOut {
+        from { opacity: 1; transform: translateY(0); }
+        to { opacity: 0; transform: translateY(10px); }
+    }
+`;
+document.head.appendChild(loadingStyles);
+
+const buttonStyles = document.createElement('style');
+buttonStyles.textContent = `
+    .send-button, .clear-button {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .send-button {
+        color: #6c5ce7;
+        background: rgba(108, 92, 231, 0.1);
+    }
+
+    .send-button:hover {
+        color: #ffffff;
+        background: #6c5ce7;
+        transform: scale(1.1) rotate(5deg);
+        box-shadow: 0 4px 12px rgba(108, 92, 231, 0.3);
+    }
+
+    .clear-button {
+        color: #e74c3c;
+        background: rgba(231, 76, 60, 0.1);
+    }
+
+    .clear-button:hover {
+        color: #ffffff;
+        background: #e74c3c;
+        transform: scale(1.1) rotate(-5deg);
+        box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+    }
+
+    .send-button i, .clear-button i {
+        font-size: 18px;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .send-button:hover i {
+        transform: translateX(2px);
+    }
+
+    .clear-button:hover i {
+        transform: translateX(-2px);
+    }
+
+    .send-button::after, .clear-button::after {
+        content: '';
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 70%);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .send-button:hover::after, .clear-button:hover::after {
+        opacity: 1;
+    }
+`;
+document.head.appendChild(buttonStyles);
+
+        // Update modal styles
+        const modalStyles = document.createElement('style');
+        modalStyles.textContent = `
+            .modal-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                display: none;
+                justify-content: center;
+                align-items: flex-start;
+            }
+
+            .modal-content {
+                background: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                z-index: 1001;
+                width:650px;
+                user-select: none;
+            }
+
+            .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #eee;
+            }
+
+            .modal-title {
+                font-size: 16px;
+                margin: 0;
+                text-align: left;
+                cursor: move;
+                user-select: none;
+                flex-grow: 1;
+            }
+
+            .close-modal-btn {
+                background: none;
+                border: none;
+                cursor: pointer;
+                padding: 5px;
+                margin-left: 10px;
+                color: #666;
+                transition: all 0.3s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 24px;
+                height: 24px;
+                border-radius: 50%;
+            }
+
+            .close-modal-btn:hover {
+                background: #f0f0f0;
+                color: #333;
+                transform: rotate(90deg);
+            }
+
+            .close-modal-btn i {
+                font-size: 18px;
+            }
+
+            .modal-buttons {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .modal-button {
+                width: 100%;
+                padding: 8px;
+                font-size: 14px;
+                position: relative;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                transition: all 0.3s ease;
+            }
+
+            .modal-button.loading {
+                pointer-events: none;
+                opacity: 0.8;
+            }
+
+            .modal-button.loading .button-text {
+                visibility: hidden;
+            }
+
+            .modal-button.loading::after {
+                content: '';
+                position: absolute;
+                width: 20px;
+                height: 20px;
+                border: 2px solid #ffffff;
+                border-radius: 50%;
+                border-top-color: transparent;
+                animation: button-spin 1s linear infinite;
+            }
+
+            @keyframes button-spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .prompt-input-container {
+                margin-top: 12px;
+            }
+
+            .prompt-input {
+                width: 100%;
+                padding: 8px;
+                font-size: 14px;
+            }
+
+            .prompt-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 8px;
+            }
+
+            @media (max-width: 768px) {
+                .modal-content {
+                    position: fixed !important;
+                    top: 50% !important;
+                    left: 50% !important;
+                    transform: translate(-50%, -50%) !important;
+                    width: 90% !important;
+                    max-width: 400px !important;
+                }
+            }
+        `;
+        document.head.appendChild(modalStyles);
+
+        // Add event listener for close button
+        document.querySelector('.close-modal-btn').addEventListener('click', function() {
+            const modal = document.querySelector('.modal-content');
+            modal.style.display = 'none';
+            // Also hide the overlay
+            document.getElementById('imageModal').style.display = 'none';
+        });
+
+        // Add click event listener for blog images
+        document.addEventListener('click', function(e) {
+            const modal = document.getElementById('imageModal');
+            const modalContent = modal.querySelector('.modal-content');
+            
+            // If clicking outside the modal content, hide the modal
+            if (!modalContent.contains(e.target) && !e.target.closest('.ql-editor img')) {
+                modal.style.display = 'none';
+                return;
+            }
+            
+            // Check if the clicked element is an image within the blog content
+            if (e.target.tagName === 'IMG' && e.target.closest('.ql-editor')) {
+                // Get the image's position
+                const imageRect = e.target.getBoundingClientRect();
+                const editorRect = document.querySelector('.ql-editor').getBoundingClientRect();
+                
+                // Calculate position relative to the editor
+                const top = 300; // 10px gap from image
+                const left = imageRect.left - editorRect.left;
+                
+                // Set fixed width for modal content
+                modalContent.style.width = '250px';
+                modalContent.style.minWidth = '250px';
+                modalContent.style.maxWidth = '250px';
+                
+                // Position the modal content
+                modalContent.style.position = 'absolute';
+                modalContent.style.top = `${top}px`;
+                modalContent.style.left = `${left}px`;
+                modalContent.style.transform = 'none';
+                
+                // Show the modal
+                modal.style.display = 'flex';
+                modalContent.style.display = 'block';
+                
+                // Reset prompt input container visibility
+                document.getElementById('promptInputContainer').style.display = 'none';
+            }
+        });
+    </script>
 </body>
 </html>

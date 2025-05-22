@@ -1,6 +1,3 @@
-
-
-
 // styling code for index.html
 // 001
  // Typewriter Effect
@@ -46,6 +43,13 @@
  document.querySelector('.hamburger').addEventListener('click', function() {
      document.querySelector('.nav-links').classList.toggle('active');
  });
+
+// Close hamburger menu when a nav link is clicked
+document.querySelectorAll('.nav-links a').forEach(link => {
+    link.addEventListener('click', function() {
+        document.querySelector('.nav-links').classList.remove('active');
+    });
+});
 
 
 // 003
@@ -157,6 +161,9 @@
                      const value = number.textContent;
                      let targetValue;
                      
+                     // Store the original value as a data attribute
+                     number.dataset.originalValue = value;
+                     
                      if (value.includes('K')) {
                          targetValue = parseFloat(value) * 1000;
                      } else if (value.includes('M')) {
@@ -167,8 +174,12 @@
                          targetValue = parseFloat(value);
                      }
                      
-                     number.textContent = '0';
-                     animateValue(number, 0, targetValue, 2000);
+                     // Only animate if not already animated
+                     if (!number.dataset.animated) {
+                         number.textContent = '0';
+                         animateValue(number, 0, targetValue, 2000);
+                         number.dataset.animated = 'true';
+                     }
                  }, index * 200);
              });
          }
@@ -193,6 +204,9 @@
          element.textContent = formatNumber(value);
          if (progress < 1) {
              window.requestAnimationFrame(step);
+         } else {
+             // When animation is complete, restore the original format
+             element.textContent = element.dataset.originalValue;
          }
      };
      window.requestAnimationFrame(step);
